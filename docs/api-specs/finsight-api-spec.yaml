@@ -1,0 +1,1262 @@
+openapi: 3.0.3
+info:
+  title: Zetheta FinSight API - Destination Endpoints
+  description: |
+    API specifications for loading financial data into Zetheta FinSight 
+    analytics platform from SAP S/4HANA.
+    
+    ## Platform Details
+    - **Platform:** Zetheta FinSight v4.2
+    - **Deployment:** AWS Mumbai Region (ap-south-1)
+    - **Data Residency:** All data stays within Indian borders (RBI compliance)
+    
+    ## Authentication
+    - **Type:** OAuth 2.0 Client Credentials Flow
+    - **Token URL:** https://auth.finsight.zetheta.com/oauth2/token
+    - **Token Refresh:** Automatic refresh using refresh_token grant
+    
+    ## Rate Limiting
+    - **Default Limit:** 1,000 requests per minute
+    - **Burst Limit:** 2,000 requests per minute
+    - **Batch Size:** Max 500 records per request
+    
+    ## Idempotency
+    - **Header:** Idempotency-Key
+    - **Purpose:** Prevent duplicate processing
+    - **Retention:** 24 hours for idempotency keys
+    
+    ## India-Specific Compliance
+    - **RBI Data Localization:** All data in AWS Mumbai region
+    - **GST Compliance:** Preserve CGST/SGST/IGST breakdown
+    - **TDS Compliance:** TDS deduction tracking
+    - **Audit Trail:** Complete data lineage from SAP to FinSight
+    
+  version: 1.0.0
+  contact:
+    name: Zetheta FinSight Team
+    email: api-support@zetheta.com
+
+servers:
+  - url: https://api.finsight.zetheta.com/v1
+    description: FinSight Production API
+  - url: https://api-qa.finsight.zetheta.com/v1
+    description: FinSight QA API
+
+tags:
+  - name: Journal Entries
+    description: GL Journal Entry Loading
+  - name: Vendors
+    description: Vendor Master and AP Open Items
+  - name: Customers
+    description: Customer Master and AR Open Items
+  - name: Cost Centres
+    description: Cost Centre Master and Totals
+  - name: Profit Centres
+    description: Profit Centre Master
+  - name: Purchase Orders
+    description: Procurement Data
+  - name: Sales Orders
+    description: Sales Data
+  - name: Assets
+    description: Fixed Asset Data
+  - name: Bank Statements
+    description: Banking Data
+  - name: Materials
+    description: Material Master and Inventory
+  - name: Budget
+    description: Budget vs Actual
+  - name: Reconciliation
+    description: Reconciliation Results
+
+components:
+  securitySchemes:
+    OAuth2:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.finsight.zetheta.com/oauth2/token
+          scopes:
+            write:journal: Write GL Journal Entries
+            write:vendor: Write Vendor Data
+            write:customer: Write Customer Data
+            write:costcentre: Write Cost Centre Data
+            write:profitcentre: Write Profit Centre Data
+            write:purchaseorder: Write Purchase Order Data
+            write:salesorder: Write Sales Order Data
+            write:asset: Write Asset Data
+            write:bank: Write Bank Statement Data
+            write:material: Write Material Data
+            write:budget: Write Budget Data
+            write:reconciliation: Write Reconciliation Results
+            read:reconciliation: Read Reconciliation Results
+
+  parameters:
+    IdempotencyKey:
+      name: Idempotency-Key
+      in: header
+      description: |
+        Unique key to prevent duplicate processing.
+        - Format: UUID v4 or base64 encoded string
+        - Maximum length: 128 characters
+        - Retention: 24 hours
+      schema:
+        type: string
+        example: "550e8400-e29b-41d4-a716-446655440000"
+    TenantId:
+      name: X-Tenant-Id
+      in: header
+      description: FinSight tenant identifier
+      schema:
+        type: string
+        enum: [MERIDIAN-PROD, MERIDIAN-QA, MERIDIAN-DEV]
+        example: MERIDIAN-PROD
+    Limit:
+      name: limit
+      in: query
+      description: Maximum number of records to return
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 1000
+        default: 100
+    Offset:
+      name: offset
+      in: query
+      description: Pagination offset
+      schema:
+        type: integer
+        minimum: 0
+        default: 0
+
+  schemas:
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: object
+          properties:
+            code:
+              type: string
+              description: Error code
+              enum:
+                - INVALID_REQUEST
+                - INVALID_DATE_FORMAT
+                - INVALID_CURRENCY_CODE
+                - TOKEN_EXPIRED
+                - INVALID_TOKEN
+                - INSUFFICIENT_SCOPE
+                - TENANT_LOCKED
+                - RESOURCE_NOT_FOUND
+                - DUPLICATE_ENTRY
+                - CONCURRENT_MODIFICATION
+                - BUSINESS_RULE_VIOLATION
+                - REFERENTIAL_INTEGRITY
+                - RATE_LIMITED
+                - INTERNAL_ERROR
+                - SERVICE_UNAVAILABLE
+                - GATEWAY_TIMEOUT
+            message:
+              type: string
+              description: Human readable error message
+            details:
+              type: array
+              items:
+                type: string
+              description: Additional error details
+            timestamp:
+              type: string
+              format: date-time
+              description: Error timestamp
+            requestId:
+              type: string
+              description: Request ID for debugging
+      required:
+        - error
+
+    SuccessResponse:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [success, partial_success]
+          description: Operation status
+        message:
+          type: string
+          description: Status message
+        data:
+          type: object
+          properties:
+            recordsProcessed:
+              type: integer
+              description: Number of records successfully processed
+            recordsFailed:
+              type: integer
+              description: Number of records that failed
+            failedRecords:
+              type: array
+              items:
+                type: object
+                properties:
+                  recordId:
+                    type: string
+                  error:
+                    type: string
+                  errorCode:
+                    type: string
+            requestId:
+              type: string
+              description: Unique request identifier
+        timestamp:
+          type: string
+          format: date-time
+          description: Response timestamp
+
+    JournalEntryLoad:
+      type: object
+      required:
+        - documentId
+        - postingDate
+        - companyCode
+        - glAccount
+        - amountLC
+        - localCurrency
+      properties:
+        documentId:
+          type: string
+          description: SAP Document Number (BUKRS-GJAHR-BELNR)
+          maxLength: 50
+          example: "MC01-2026-0000012345"
+        postingDate:
+          type: string
+          format: date
+          description: Posting Date (ISO 8601)
+          example: "2026-03-28"
+        documentDate:
+          type: string
+          format: date
+          description: Document Date
+          example: "2026-03-28"
+        documentType:
+          type: string
+          enum: [SA, RV, KR, KA, WA, AB, DZ, KZ, RE, WE]
+          description: Document Type
+          example: "SA"
+        companyCode:
+          type: string
+          enum: [MC01, MC02, MC03]
+          description: Company Code
+          example: MC01
+        fiscalYear:
+          type: string
+          pattern: ^20[0-9]{2}$
+          description: Fiscal Year
+          example: "2026"
+        postingPeriod:
+          type: string
+          pattern: ^(001|002|003|004|005|006|007|008|009|010|011|012|013|014|015|016)$
+          description: Posting Period
+          example: "003"
+        glAccount:
+          type: string
+          pattern: ^[0-9]{6}$
+          description: G/L Account Number
+          example: "400000"
+        glAccountName:
+          type: string
+          description: G/L Account Name
+          example: "Revenue - Automotive"
+        amountLC:
+          type: number
+          format: double
+          minimum: -999999999.99
+          maximum: 999999999.99
+          description: Amount in Local Currency
+          example: 15000.00
+        amountTC:
+          type: number
+          format: double
+          description: Amount in Transaction Currency
+          example: 15000.00
+        localCurrency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: Local Currency Code (ISO 4217)
+          example: "INR"
+        transactionCurrency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: Transaction Currency Code (ISO 4217)
+          example: "INR"
+        exchangeRate:
+          type: number
+          format: double
+          minimum: 0
+          description: Exchange Rate
+          example: 1.0000
+        costCentre:
+          type: string
+          description: Cost Centre ID
+          example: "1000"
+        profitCentre:
+          type: string
+          description: Profit Centre ID
+          example: "1000"
+        segment:
+          type: string
+          description: Business Segment
+          example: "01"
+        referenceDocument:
+          type: string
+          maxLength: 50
+          description: Reference Document Number
+          example: "PO-2026-001234"
+        userName:
+          type: string
+          maxLength: 30
+          description: User Name
+          example: "FINANCE"
+        isReversal:
+          type: boolean
+          description: Reversal Flag
+          example: false
+        gstBreakdown:
+          type: object
+          description: GST Breakdown (India compliance)
+          properties:
+            cgst:
+              type: number
+              format: double
+              description: CGST Amount
+              example: 900.00
+            sgst:
+              type: number
+              format: double
+              description: SGST Amount
+              example: 900.00
+            igst:
+              type: number
+              format: double
+              description: IGST Amount
+              example: 1800.00
+            taxCode:
+              type: string
+              description: SAP Tax Code
+              example: "IGST18"
+        metadata:
+          type: object
+          description: Additional metadata
+          additionalProperties: true
+
+    VendorLoad:
+      type: object
+      required:
+        - vendorId
+        - vendorName
+        - companyCode
+      properties:
+        vendorId:
+          type: string
+          maxLength: 30
+          description: Vendor Number
+          example: "V0001234"
+        vendorName:
+          type: string
+          maxLength: 100
+          description: Vendor Name
+          example: "ABC Suppliers Pvt Ltd"
+        country:
+          type: string
+          pattern: ^[A-Z]{2}$
+          description: Country Code (ISO 3166)
+          example: "IN"
+        city:
+          type: string
+          maxLength: 50
+          description: City
+          example: "Mumbai"
+        address:
+          type: string
+          maxLength: 200
+          description: Address
+          example: "123 Industrial Area"
+        gstNumber:
+          type: string
+          pattern: ^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}[Z]{1}[0-9A-Z]{1}$
+          description: GST Number (15 characters)
+          example: "27AABCU1234D1Z1"
+        panNumber:
+          type: string
+          pattern: ^[A-Z]{5}[0-9]{4}[A-Z]{1}$
+          description: PAN Number
+          example: "AABCU1234D"
+        companyCode:
+          type: string
+          enum: [MC01, MC02, MC03]
+          description: Company Code
+          example: MC01
+        accountGroup:
+          type: string
+          description: Account Group
+          example: "001"
+        reconciliationAccount:
+          type: string
+          pattern: ^[0-9]{6}$
+          description: Reconciliation Account
+          example: "200000"
+        termsOfPayment:
+          type: string
+          description: Terms of Payment
+          example: "0001"
+        paymentBlock:
+          type: string
+          description: Payment Block
+          example: ""
+        toleranceGroup:
+          type: string
+          description: Tolerance Group
+          example: "001"
+        bankDetails:
+          type: object
+          properties:
+            bankCountry:
+              type: string
+              pattern: ^[A-Z]{2}$
+              example: "IN"
+            bankKey:
+              type: string
+              example: "SBIN0001234"
+            bankAccount:
+              type: string
+              example: "123456789012"
+            ifscCode:
+              type: string
+              pattern: ^[A-Z]{4}0[A-Z0-9]{6}$
+              description: IFSC Code for Indian banks
+              example: "SBIN0001234"
+        active:
+          type: boolean
+          description: Active status
+          default: true
+
+    CustomerLoad:
+      type: object
+      required:
+        - customerId
+        - customerName
+        - companyCode
+      properties:
+        customerId:
+          type: string
+          maxLength: 30
+          description: Customer Number
+          example: "C0001234"
+        customerName:
+          type: string
+          maxLength: 100
+          description: Customer Name
+          example: "XYZ Trading Ltd"
+        country:
+          type: string
+          pattern: ^[A-Z]{2}$
+          description: Country Code
+          example: "IN"
+        city:
+          type: string
+          maxLength: 50
+          description: City
+          example: "Delhi"
+        address:
+          type: string
+          maxLength: 200
+          description: Address
+          example: "456 Market Road"
+        gstNumber:
+          type: string
+          pattern: ^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}[Z]{1}[0-9A-Z]{1}$
+          description: GST Number
+          example: "07AABCU1234D1Z1"
+        panNumber:
+          type: string
+          pattern: ^[A-Z]{5}[0-9]{4}[A-Z]{1}$
+          description: PAN Number
+          example: "AABCU1234D"
+        companyCode:
+          type: string
+          enum: [MC01, MC02, MC03]
+          description: Company Code
+          example: MC01
+        reconciliationAccount:
+          type: string
+          pattern: ^[0-9]{6}$
+          description: Reconciliation Account
+          example: "100000"
+        creditLimit:
+          type: number
+          format: double
+          minimum: 0
+          description: Credit Limit
+          example: 500000.00
+        creditLimitUsed:
+          type: number
+          format: double
+          minimum: 0
+          description: Credit Limit Used
+          example: 250000.00
+        availableCredit:
+          type: number
+          format: double
+          minimum: 0
+          description: Available Credit
+          example: 250000.00
+        termsOfPayment:
+          type: string
+          description: Terms of Payment
+          example: "0002"
+        active:
+          type: boolean
+          description: Active status
+          default: true
+
+    CostCentreLoad:
+      type: object
+      required:
+        - costCentreId
+        - name
+        - companyCode
+      properties:
+        costCentreId:
+          type: string
+          maxLength: 20
+          description: Cost Centre ID
+          example: "1000"
+        controllingArea:
+          type: string
+          description: Controlling Area
+          example: "1000"
+        companyCode:
+          type: string
+          enum: [MC01, MC02, MC03]
+          description: Company Code
+          example: MC01
+        name:
+          type: string
+          maxLength: 50
+          description: Cost Centre Name
+          example: "Production Department"
+        longText:
+          type: string
+          maxLength: 200
+          description: Long Description
+          example: "Main Production Department - Plant PL01"
+        category:
+          type: string
+          description: Cost Centre Category
+          example: "F"
+        responsiblePerson:
+          type: string
+          description: Responsible Person
+          example: "MANAGER01"
+        validFrom:
+          type: string
+          format: date
+          description: Valid From Date
+          example: "2026-01-01"
+        validTo:
+          type: string
+          format: date
+          description: Valid To Date
+          example: "9999-12-31"
+        hierarchy:
+          type: object
+          description: 7-Level Hierarchy (Flattened)
+          properties:
+            level1:
+              type: string
+              description: Level 1 (Top Parent)
+            level2:
+              type: string
+            level3:
+              type: string
+            level4:
+              type: string
+            level5:
+              type: string
+            level6:
+              type: string
+            level7:
+              type: string
+              description: Level 7 (Leaf Node)
+
+    ReconciliationResult:
+      type: object
+      required:
+        - batchId
+        - dataDomain
+        - reconciliationStatus
+      properties:
+        batchId:
+          type: string
+          description: Unique batch identifier
+          example: "BATCH-GL-20260328-0930"
+        dataDomain:
+          type: string
+          enum: [GL, AP, AR, COST, PROCUREMENT, SALES, ASSETS, BANK, MATERIALS, BUDGET]
+          description: Data domain reconciled
+          example: "GL"
+        extractionTimestamp:
+          type: string
+          format: date-time
+          description: Extraction start time
+          example: "2026-03-28T09:30:00+05:30"
+        loadCompletionTimestamp:
+          type: string
+          format: date-time
+          description: Load completion time
+          example: "2026-03-28T09:32:45+05:30"
+        sourceRecords:
+          type: integer
+          description: Records extracted from source
+          example: 6247
+        targetRecords:
+          type: integer
+          description: Records loaded to target
+          example: 6241
+        recordsFailed:
+          type: integer
+          description: Records that failed validation
+          example: 4
+        recordsSkipped:
+          type: integer
+          description: Records skipped (idempotent duplicates)
+          example: 2
+        sourceChecksum:
+          type: number
+          format: double
+          description: Source checksum
+          example: 241789342.30
+        targetChecksum:
+          type: number
+          format: double
+          description: Target checksum
+          example: 241789342.30
+        variance:
+          type: number
+          format: double
+          description: Variance amount
+          example: 0.00
+        reconciliationStatus:
+          type: string
+          enum: [RECONCILED, VARIANCE, BREAK]
+          description: Reconciliation status
+          example: "RECONCILED"
+        dlqRecords:
+          type: integer
+          description: Records in Dead Letter Queue
+          example: 17
+        processingDuration:
+          type: string
+          description: Total processing duration
+          example: "2m45s"
+        throughput:
+          type: number
+          format: double
+          description: Records per second
+          example: 37.8paths:
+  # ============================================
+  # DST-001: Load GL Journal Entries
+  # ============================================
+  /journal-entries:
+    post:
+      tags:
+        - Journal Entries
+      summary: Load GL Journal Entries
+      description: |
+        Loads General Ledger journal entries into FinSight.
+        Supports idempotent processing to prevent duplicates.
+        
+        **Validation Rules:**
+        - Debit = Credit per document
+        - GL account must exist in chart of accounts
+        - Cost centre must exist in master data
+        - GST breakdown must be consistent
+        - Posting date must be within fiscal year
+      operationId: loadJournalEntries
+      security:
+        - OAuth2:
+            - write:journal
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - entries
+              properties:
+                entries:
+                  type: array
+                  minItems: 1
+                  maxItems: 500
+                  items:
+                    $ref: '#/components/schemas/JournalEntryLoad'
+                options:
+                  type: object
+                  properties:
+                    validateOnly:
+                      type: boolean
+                      description: Validate without loading
+                      default: false
+                    skipDuplicates:
+                      type: boolean
+                      description: Skip duplicate entries
+                      default: true
+            examples:
+              single_entry:
+                value:
+                  entries:
+                    - documentId: "MC01-2026-0000012345"
+                      postingDate: "2026-03-28"
+                      documentDate: "2026-03-28"
+                      documentType: "SA"
+                      companyCode: "MC01"
+                      fiscalYear: "2026"
+                      postingPeriod: "003"
+                      glAccount: "400000"
+                      amountLC: 15000.00
+                      localCurrency: "INR"
+                      costCentre: "1000"
+                      profitCentre: "1000"
+                      gstBreakdown:
+                        cgst: 900.00
+                        sgst: 900.00
+              batch_entries:
+                value:
+                  entries:
+                    - documentId: "MC01-2026-0000012345"
+                      postingDate: "2026-03-28"
+                      companyCode: "MC01"
+                      glAccount: "400000"
+                      amountLC: 15000.00
+                      localCurrency: "INR"
+                    - documentId: "MC01-2026-0000012346"
+                      postingDate: "2026-03-28"
+                      companyCode: "MC01"
+                      glAccount: "200000"
+                      amountLC: -15000.00
+                      localCurrency: "INR"
+      responses:
+        '201':
+          description: Created - Successfully loaded
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+              example:
+                status: "success"
+                message: "Successfully loaded 2 journal entries"
+                data:
+                  recordsProcessed: 2
+                  recordsFailed: 0
+                  failedRecords: []
+                  requestId: "req-20260328-001234-5678"
+                timestamp: "2026-03-28T09:30:00+05:30"
+        '400':
+          description: Bad Request
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalid_request:
+                  value:
+                    error:
+                      code: "INVALID_REQUEST"
+                      message: "Request validation failed"
+                      details:
+                        - "Field 'entries[0].amountLC' must be a number"
+                        - "Field 'entries[1].documentId' is required"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+                      requestId: "req-20260328-001234-5678"
+                invalid_date_format:
+                  value:
+                    error:
+                      code: "INVALID_DATE_FORMAT"
+                      message: "Invalid date format"
+                      details:
+                        - "Posting date must be in ISO 8601 format (YYYY-MM-DD)"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+                      requestId: "req-20260328-001234-5678"
+                invalid_currency:
+                  value:
+                    error:
+                      code: "INVALID_CURRENCY_CODE"
+                      message: "Invalid currency code"
+                      details:
+                        - "Currency code must be 3-letter ISO 4217 format"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+                      requestId: "req-20260328-001234-5678"
+                business_rule_violation:
+                  value:
+                    error:
+                      code: "BUSINESS_RULE_VIOLATION"
+                      message: "Business rule violation"
+                      details:
+                        - "Debit-Credit mismatch detected for document MC01-2026-0000012345"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+                      requestId: "req-20260328-001234-5678"
+                referential_integrity:
+                  value:
+                    error:
+                      code: "REFERENTIAL_INTEGRITY"
+                      message: "Referential integrity violation"
+                      details:
+                        - "Cost centre '1000' not found in master data"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+                      requestId: "req-20260328-001234-5678"
+        '401':
+          description: Unauthorized
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                token_expired:
+                  value:
+                    error:
+                      code: "TOKEN_EXPIRED"
+                      message: "Access token expired"
+                      details:
+                        - "Token expired at 2026-03-28T09:00:00+05:30"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+                invalid_token:
+                  value:
+                    error:
+                      code: "INVALID_TOKEN"
+                      message: "Invalid access token"
+                      details:
+                        - "Token is malformed or revoked"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+        '403':
+          description: Forbidden
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                insufficient_scope:
+                  value:
+                    error:
+                      code: "INSUFFICIENT_SCOPE"
+                      message: "Insufficient scope for this operation"
+                      details:
+                        - "Required scope: write:journal"
+                        - "Current scopes: read:journal"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+                tenant_locked:
+                  value:
+                    error:
+                      code: "TENANT_LOCKED"
+                      message: "Tenant is locked for maintenance"
+                      details:
+                        - "Maintenance window: 2026-03-28T22:00:00+05:30 to 2026-03-29T06:00:00+05:30"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+        '409':
+          description: Conflict
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                duplicate_entry:
+                  value:
+                    error:
+                      code: "DUPLICATE_ENTRY"
+                      message: "Duplicate entry detected"
+                      details:
+                        - "Document MC01-2026-0000012345 already exists"
+                        - "Idempotency key: 550e8400-e29b-41d4-a716-446655440000"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+                concurrent_modification:
+                  value:
+                    error:
+                      code: "CONCURRENT_MODIFICATION"
+                      message: "Concurrent modification detected"
+                      details:
+                        - "Resource was modified by another process"
+                      timestamp: "2026-03-28T09:30:00+05:30"
+        '429':
+          description: Rate Limited
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying
+              schema:
+                type: integer
+            X-RateLimit-Limit:
+              description: Rate limit quota
+              schema:
+                type: integer
+            X-RateLimit-Remaining:
+              description: Remaining requests in current window
+              schema:
+                type: integer
+            X-RateLimit-Reset:
+              description: Time when rate limit resets (UTC)
+              schema:
+                type: string
+                format: date-time
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "RATE_LIMITED"
+                  message: "Rate limit exceeded"
+                  details:
+                    - "Limit: 1000 requests per minute"
+                    - "Please retry after 45 seconds"
+                  timestamp: "2026-03-28T09:30:00+05:30"
+        '500':
+          description: Internal Server Error
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "INTERNAL_ERROR"
+                  message: "Internal server error"
+                  details:
+                    - "An unexpected error occurred while processing"
+                  timestamp: "2026-03-28T09:30:00+05:30"
+        '503':
+          description: Service Unavailable
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "SERVICE_UNAVAILABLE"
+                  message: "Service temporarily unavailable"
+                  details:
+                    - "Platform is under maintenance"
+                    - "Maintenance window: 2026-03-28T22:00:00+05:30 to 2026-03-29T06:00:00+05:30"
+                  timestamp: "2026-03-28T09:30:00+05:30"
+        '504':
+          description: Gateway Timeout
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error:
+                  code: "GATEWAY_TIMEOUT"
+                  message: "Gateway timeout"
+                  details:
+                    - "Upstream service timed out after 30 seconds"
+                  timestamp: "2026-03-28T09:30:00+05:30"
+
+  # ============================================
+  # DST-002: Load Vendors
+  # ============================================
+  /vendors:
+    post:
+      tags:
+        - Vendors
+      summary: Load Vendor Master Data
+      description: |
+        Loads vendor master data into FinSight.
+        Includes GST and PAN validation for India compliance.
+      operationId: loadVendors
+      security:
+        - OAuth2:
+            - write:vendor
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - vendors
+              properties:
+                vendors:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    $ref: '#/components/schemas/VendorLoad'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ============================================
+  # DST-003: Load Customers
+  # ============================================
+  /customers:
+    post:
+      tags:
+        - Customers
+      summary: Load Customer Master Data
+      description: |
+        Loads customer master data into FinSight.
+        Includes credit limit and GST validation.
+      operationId: loadCustomers
+      security:
+        - OAuth2:
+            - write:customer
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - customers
+              properties:
+                customers:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    $ref: '#/components/schemas/CustomerLoad'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ============================================
+  # DST-004: Load Cost Centres
+  # ============================================
+  /cost-centres:
+    post:
+      tags:
+        - Cost Centres
+      summary: Load Cost Centre Master Data
+      description: |
+        Loads cost centre master data into FinSight.
+        Includes 7-level hierarchy flattening.
+      operationId: loadCostCentres
+      security:
+        - OAuth2:
+            - write:costcentre
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - costCentres
+              properties:
+                costCentres:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items:
+                    $ref: '#/components/schemas/CostCentreLoad'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ============================================
+  # DST-005: Load Reconciliation Results
+  # ============================================
+  /reconciliation:
+    post:
+      tags:
+        - Reconciliation
+      summary: Store Reconciliation Results
+      description: |
+        Stores daily reconciliation results for audit purposes.
+        Used by the reconciliation service to log results.
+      operationId: storeReconciliation
+      security:
+        - OAuth2:
+            - write:reconciliation
+      parameters:
+        - $ref: '#/components/parameters/IdempotencyKey'
+        - $ref: '#/components/parameters/TenantId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ReconciliationResult'
+      responses:
+        '201':
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SuccessResponse'
+
+  # ============================================
+  # DST-006: Get Reconciliation Results
+  # ============================================
+  /reconciliation/{batchId}:
+    get:
+      tags:
+        - Reconciliation
+      summary: Get Reconciliation Results
+      description: |
+        Retrieves reconciliation results by batch ID.
+        Used for audit and monitoring purposes.
+      operationId: getReconciliation
+      security:
+        - OAuth2:
+            - read:reconciliation
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+        - name: batchId
+          in: path
+          required: true
+          description: Batch ID of reconciliation
+          schema:
+            type: string
+            example: "BATCH-GL-20260328-0930"
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ReconciliationResult'
+        '404':
+          description: Not Found
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  # ============================================
+  # DST-007: Health Check
+  # ============================================
+  /health:
+    get:
+      tags:
+        - System
+      summary: API Health Check
+      description: |
+        Returns API health status for monitoring purposes.
+        Used by monitoring stack to check API availability.
+      operationId: healthCheck
+      responses:
+        '200':
+          description: Healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [healthy, degraded, unhealthy]
+                  version:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+                  services:
+                    type: object
+                    additionalProperties:
+                      type: object
+                      properties:
+                        status:
+                          type: string
+                        latency:
+                          type: number
+              example:
+                status: "healthy"
+                version: "4.2.0"
+                timestamp: "2026-03-28T09:30:00+05:30"
+                services:
+                  database:
+                    status: "healthy"
+                    latency: 5
+                  kafka:
+                    status: "healthy"
+                    latency: 10
+
+  # ============================================
+  # DST-008: Get Rate Limits
+  # ============================================
+  /rate-limits:
+    get:
+      tags:
+        - System
+      summary: Get Rate Limit Status
+      description: |
+        Returns current rate limit status for the authenticated client.
+        Used by integration to monitor usage.
+      operationId: getRateLimits
+      security:
+        - OAuth2:
+            - write:journal
+      parameters:
+        - $ref: '#/components/parameters/TenantId'
+      responses:
+        '200':
+          description: Success
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  limits:
+                    type: object
+                    properties:
+                      journalEntries:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                          remaining:
+                            type: integer
+                          reset:
+                            type: string
+                            format: date-time
+                      vendors:
+                        type: object
+                        properties:
+                          limit:
+                            type: integer
+                          remaining:
+                            type: integer
+                          reset:
+                            type: string
+                            format: date-time
+              example:
+                limits:
+                  journalEntries:
+                    limit: 1000
+                    remaining: 987
+                    reset: "2026-03-28T09:31:00+05:30"
+                  vendors:
+                    limit: 1000
+                    remaining: 999
+                    reset: "2026-03-28T09:31:00+05:30"
